@@ -16,7 +16,7 @@ var (
 
 // Firestore's snapshot data returns data in a map[string]any structure
 // Safe to assume we can treat integer keys as strings unless mathematical
-// operations are necessary.  Handle those separately.  
+// operations are necessary.  Handle those separately.
 type FirestoreCache[V any] struct {
 	cfg    *FirestoreConfig
 	client *fs.Client
@@ -39,6 +39,10 @@ func (c *FirestoreCache[V]) Get(key string) (V, bool) {
 	return c.cache.Get(key)
 }
 
+func (c *FirestoreCache[V]) Set(key string, value V) {
+	c.cache.Set(key, value)
+}
+
 func (c *FirestoreCache[V]) Listen(ctx context.Context) {
 	changes := c.client.Collection(c.cfg.Collection).Doc(c.cfg.Document).Snapshots(ctx)
 	var once sync.Once
@@ -50,18 +54,19 @@ func (c *FirestoreCache[V]) Listen(ctx context.Context) {
 
 	go func() {
 		for {
-			change, err := changes.Next()
+			snap, err := changes.Next()
 			if err != nil {
 				log.Fatal(err)
 			}
-			for key, value := range change.Data() {
-				asserted, ok := value.(V)
-				if !ok {
-					log.Fatal(ErrValueTypeMismatch)
-				}
-				c.cache.Set(key, asserted)
+			var data map[string]V
+			err = snap.DataTo(&data)
+			if err != nil {
+				log.Fatal(err)
 			}
-	
+			for key, value := range data {
+				c.cache.Set(key, value)
+			}
+
 			once.Do(readyFunc)
 		}
 	}()
@@ -74,3 +79,19 @@ type FirestoreConfig struct {
 	Collection string
 	Document   string
 }
+
+
+
+// func testingTerminal[V any](c *FirestoreCache[V]) {
+// 	scanner := bufio.NewScanner(os.Stdin)
+// 	for scanner.Scan() {
+// 		log.Println(scanner.Text())
+// 		input := scanner.Text()
+// 		doc, ok := c.Get(input)
+// 		if ok {
+// 			log.Println(doc)
+// 		} else {
+// 			log.Println("uh oh!")
+// 		}
+// 	}
+// }
